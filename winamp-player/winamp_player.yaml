@@ -1,0 +1,791 @@
+# ==============================================================================
+# 🎵 LECTEUR WINAMP STANDALONE - HOME ASSISTANT
+# ==============================================================================
+# Type : custom:button-card (Nécessite l'installation via HACS)
+# Description : Carte générique reproduisant l'esthétique et la logique d'un lecteur Winamp classique.
+# Auteur : Gaël avec l'aide de l'IA Antigravity
+# Prérequis :
+#   - Remplacer l'entité ci-dessous par votre propre media_player.
+# ==============================================================================
+type: custom:button-card
+entity: media_player.spotifyplus_gael
+show_name: false
+show_icon: false
+show_state: false
+show_ripple: false
+tap_action:
+  action: none
+hold_action:
+  action: none
+double_tap_action:
+  action: none
+
+styles:
+  card:
+    - padding: "12px"
+    - color: "#ffffff"
+    - overflow: "visible"
+    - pointer-events: "auto"
+    - box-sizing: "border-box"
+    - width: "100%"
+  grid:
+    - padding: 0
+    - width: 100% !important
+    - min-width: 100% !important
+    - flex: 1
+    - justify-self: stretch
+    - align-self: stretch
+    # --- ARCHITECTURE DE LA CARTE (CSS GRID) --- 
+    # Le 'grid-template-areas' définit l'ossature (les fondations).
+    # Ici : la pochette ("art") prend toute la colonne de gauche.
+    # À droite s'empilent l'écran ("info"), la barre ("progress") et les boutons ("controls").
+    - grid-template-areas: |
+        "art info"
+        "art progress"
+        "art controls"
+    - grid-template-columns: var(--size-art-cover) calc(100% - var(--size-art-cover) - 24px)
+    - grid-template-rows: 1fr auto auto
+    - column-gap: 24px
+    - row-gap: 8px
+  custom_fields:
+    art:
+      - justify-self: start
+      - align-self: start
+      - grid-row: 1 / -1
+    info:
+      - justify-self: stretch
+      - align-self: stretch
+      - width: 100%
+      - height: 100%
+    progress:
+      - justify-self: stretch
+      - align-self: center
+      - pointer-events: auto
+    controls:
+      - justify-self: start
+      - align-self: center
+      - display: flex
+      - gap: 4px
+      - width: 100%
+
+custom_fields:
+  art: >
+    [[[
+      // --- 1. LOGIQUE DE LA POCHETTE (ART COVER) ---
+      // Extraction des attributs du media_player
+      const attr = entity ? entity.attributes : {};
+      
+      // La pochette n'est visible que si la musique est EN COURS (playing).
+      // Cela évite d'afficher une ancienne pochette restée en cache lorsque le lecteur est arrêté.
+      const isVisible = entity && entity.state === 'playing';
+      const image = isVisible ? (attr.entity_picture || '') : '';
+      
+      return `
+        <!-- 
+          [ZONE MODIFIABLE] : DIMENSIONS DE LA POCHETTE (HTML)
+          ⚠️ ATTENTION : Si vous modifiez 'width' et 'height' ici (ex: 100px), 
+          vous DEVEZ obligatoirement aller tout en bas du fichier et modifier la 
+          variable globale '--size-art-cover' avec la même valeur.
+        -->
+        <div style="width: 190px; height: 190px; border-radius: var(--radius-md); border: 4px solid var(--color-chassis-base); border-top-color: var(--color-chassis-shadow-deep); border-left-color: var(--color-chassis-shadow-light); border-bottom-color: var(--color-chassis-highlight-deep); border-right-color: var(--color-chassis-highlight-light); background: radial-gradient(ellipse at center, #1a1a1a 0%, #000000 100%); box-shadow: var(--shadow-encastrement); position: relative; overflow: hidden; display: flex; align-items: center; justify-content: center;">
+          ${image ? `<img src="${image}" style="width: 100%; height: 100%; object-fit: cover;">` : `<ha-icon icon="mdi:music-circle" style="width: 50%; height: 50%; color: var(--color-chassis-highlight-deep);"></ha-icon>`}
+          <div style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0) 50%, rgba(0,0,0,0.3) 100%); pointer-events: none;"></div>
+        </div>
+      `;
+    ]]]
+  info: >
+    [[[
+      // --- 2. LOGIQUE DE L'ÉCRAN LCD ---
+      const attr = entity ? entity.attributes : {};
+      
+      // [ZONE MODIFIABLE] : TEXTES PAR DÉFAUT (Quand aucune musique n'est lancée)
+      // Modifiez ces textes ("Stopped", "Paused") par ce que vous préférez voir à l'arrêt
+      const title = attr.media_title || (entity ? 'Stopped' : 'En attente...');
+      const artist = attr.media_artist || (entity ? 'Paused' : 'Veuillez configurer un lecteur');
+      const album = attr.media_album_name || '';
+      
+      // Conversion de la durée totale (secondes) en format lisible (MM:SS)
+      let timeString = '';
+      if (attr.media_duration) {
+        const mins = Math.floor(attr.media_duration / 60);
+        const secs = Math.floor(attr.media_duration % 60);
+        timeString = `${mins}:${secs.toString().padStart(2, '0')}`;
+      } else if (!entity) {
+        timeString = '0:00';
+      }
+
+      // Construction du sous-titre complet (Titre - Album)
+      let subtitle = title;
+      if (album) subtitle += ` - ${album}`;
+      
+      // --- ANIMATION DE DÉFILEMENT (MARQUEE) ---
+      // On vérifie si les textes dépassent la largeur de l'écran LCD
+      let artistNeedsScroll = artist.length > 18;
+      let subtitleNeedsScroll = subtitle.length > 28;
+      
+      // [ZONE MODIFIABLE] : VITESSE DE DÉFILEMENT DU TEXTE (MARQUEE)
+      // Modificateurs de vitesse : Plus le chiffre est grand, plus le texte défile LENTEMENT.
+      const speedArtist = 0.55;   // Vitesse de la ligne 1 (Artiste)
+      const speedSubtitle = 0.40; // Vitesse de la ligne 2 (Titre et Album)
+      
+      // La vitesse de défilement s'adapte automatiquement au nombre de caractères
+      let artistDuration = artist.length * speedArtist;
+      let subtitleDuration = subtitle.length * speedSubtitle;
+      
+      // Synchronisation des deux lignes pour qu'elles tournent en boucle ensemble
+      let maxDuration = 0;
+      if (artistNeedsScroll && subtitleNeedsScroll) {
+        maxDuration = Math.max(artistDuration, subtitleDuration);
+      } else if (artistNeedsScroll) {
+        maxDuration = artistDuration;
+      } else if (subtitleNeedsScroll) {
+        maxDuration = subtitleDuration;
+      }
+      
+      let artistPercentage = maxDuration > 0 ? (artistDuration / maxDuration) * 100 : 100;
+      let subtitlePercentage = maxDuration > 0 ? (subtitleDuration / maxDuration) * 100 : 100;
+      
+      artistPercentage = Math.min(100, Math.max(0, artistPercentage));
+      subtitlePercentage = Math.min(100, Math.max(0, subtitlePercentage));
+      
+      // --- ÉTATS DU LECTEUR ---
+      const isPaused = entity ? (entity.state === 'paused' || entity.state === 'idle') : true;
+      const isPlaying = entity ? (entity.state === 'playing') : false;
+      const shuffle = attr.shuffle || false;
+      const repeat = attr.repeat || 'off';
+      
+      // [ZONE MODIFIABLE] : TEXTES D'ARRÊT (LCD)
+      // Remplacez les mots ci-dessous si vous préférez du français (ex: "EN PAUSE", "ARRÊTÉ")
+      const textStop = "STOP";
+      const textPause = "PAUSE";
+      const textOff = "OFF";
+      const isOff = entity ? (entity.state === 'off' || entity.state === 'unavailable') : false;
+      const textStatus = entity
+        ? (entity.state === 'off' || entity.state === 'unavailable'
+            ? textOff
+            : (entity.state === 'idle' ? textStop : textPause))
+        : 'NO ENTITY';
+      
+      // Source du lecteur (Fallbacks : attribut source > spécificité Spotify > Nom de l'enceinte > Inconnu)
+      const source = attr.source || attr.sp_device_name || attr.friendly_name || 'Inconnu';
+      
+      // Échappe les apostrophes pour éviter de casser les chaînes JS dans le ticker
+      const escJs = (s) => (s || '').replace(/'/g, "\\'").replace(/"/g, '\\"');    
+
+      // --- Calcul de la position initiale pour affichage immédiat (anti-clignotement) ---
+      const dur = Math.round(attr.media_duration || 0);
+      let initialPos = Math.round(attr.media_position || 0);
+      if (attr.media_position_updated_at && entity && entity.state === 'playing') {
+        const updatedTime = new Date(attr.media_position_updated_at).getTime();
+        if (!isNaN(updatedTime)) initialPos += Math.round((new Date().getTime() - updatedTime) / 1000);
+      }
+      initialPos = Math.min(Math.max(initialPos, 0), dur);
+      
+      const fm = Math.floor(initialPos / 60);
+      const fs = Math.floor(initialPos % 60).toString().padStart(2, '0');
+      const dm = Math.floor(dur / 60);
+      const ds = Math.floor(dur % 60).toString().padStart(2, '0');
+      const initialTimeDisplay = `${fm}:${fs}<span style="opacity:1; font-size: 0.9em;">|</span>${dm}:${ds}`;    
+
+      // --- GÉNÉRATEUR DYNAMIQUE D'ÉGALISEUR ---
+      const numEqBars = 10; // [ZONE MODIFIABLE] : Nombre de barres de l'égaliseur (ex: 5, 10, 16)
+      let eqHtml = '';
+      // Séquence d'animations déterministe pour éviter les sauts graphiques
+      const eqPattern = [1, 5, 9, 3, 7, 2, 6, 10, 4, 8];
+      for(let i = 0; i < numEqBars; i++) {
+        let typeIndex = eqPattern[i % eqPattern.length];
+        eqHtml += `<div class="bar bar${typeIndex}"></div>`;
+      }
+      
+      return `
+        <style>
+          /* Génération dynamique des keyframes d'animation CSS (Marquee) */
+          @keyframes sync-marquee-artist {
+            0% { transform: translateX(0); }
+            ${artistPercentage}% { transform: translateX(-50%); }
+            100% { transform: translateX(-50%); }
+          }
+          @keyframes sync-marquee-subtitle {
+            0% { transform: translateX(0); }
+            ${subtitlePercentage}% { transform: translateX(-50%); }
+            100% { transform: translateX(-50%); }
+          }
+          @keyframes fadeBlink { 
+            0% { opacity: 0.2; } 
+            100% { opacity: 1; } 
+          }
+        </style>
+        <!-- 
+          [ZONE MODIFIABLE] : ESPACEMENT (PADDING) DE L'ÉCRAN LCD
+          Si vous voulez que l'écran soit moins haut, vous devez réduire le 'padding' 
+          (actuellement à 8px 12px) dans la balise div ci-dessous, ET réduire la taille 
+          des polices HTML (voir plus bas).
+        -->
+        <div style="box-sizing: border-box; width: 100%; height: 100%; background: var(--bg-screen-lcd); border: 4px solid var(--color-chassis-base); border-top-color: var(--color-chassis-shadow-deep); border-left-color: var(--color-chassis-shadow-light); border-bottom-color: var(--color-chassis-highlight-deep); border-right-color: var(--color-chassis-highlight-light); border-radius: var(--radius-md); padding: 8px 12px; display: flex; flex-direction: column; justify-content: space-between; text-align: left; overflow: hidden; box-shadow: var(--shadow-encastrement); position: relative;">
+          <!-- Reflet vitré -->
+          <div style="position: absolute; top: 0; left: 0; right: 0; height: 50%; background: linear-gradient(to bottom, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.02) 100%); pointer-events: none; z-index: 2;"></div>
+          
+          ${isOff ? `
+          <div style="display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; position: relative; z-index: 1;">
+            <div style="font-size: 24px; font-family: var(--font-family-lcd); font-weight: var(--font-weight-lcd); color: rgba(var(--color-dos-green-rgb), 0.3); text-shadow: none;">
+              [ ${textStatus} ]
+            </div>
+          </div>
+          ` : isPaused ? `
+          <div style="display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; position: relative; z-index: 1;">
+            <div style="font-size: 24px; font-family: var(--font-family-lcd); font-weight: var(--font-weight-lcd); color: var(--color-dos-green); text-shadow: var(--text-shadow-lcd-strong); animation: fadeBlink 1.5s alternate infinite ease-in-out;">
+              [ ${textStatus} ]
+            </div>
+          </div>
+          ` : `
+          <div style="display: flex; justify-content: space-between; width: 100%; position: relative; z-index: 1;">
+            
+            <!-- Left Column: Artist + Subtitle -->
+            <div style="display: flex; flex-direction: column; overflow: hidden; flex-grow: 1;">
+              
+              <!-- [ZONE MODIFIABLE] TEXTE ARTISTE (Modifiez le font-size: 16px ci-dessous si besoin) -->
+              <div style="overflow: hidden; width: 100%; white-space: nowrap; position: relative;">
+                <div style="${artistNeedsScroll ? `animation: sync-marquee-artist ${maxDuration}s linear infinite;` : ''} font-size: 16px; font-family: var(--font-family-lcd); font-weight: var(--font-weight-lcd); color: var(--color-dos-green); text-shadow: var(--text-shadow-lcd-soft); display: inline-flex; width: max-content;">
+                  <span style="padding-right: ${artistNeedsScroll ? '50px' : '0'};">${artist}</span>
+                  ${artistNeedsScroll ? `<span style="padding-right: 50px;">${artist}</span>` : ''}
+                </div>
+              </div>
+
+              <!-- [ZONE MODIFIABLE] TEXTE SOUS-TITRE (Modifiez le font-size: 12px ci-dessous si besoin) -->
+              <div style="overflow: hidden; width: 100%; white-space: nowrap; margin-top: 4px; position: relative;">
+                <div style="${subtitleNeedsScroll ? `animation: sync-marquee-subtitle ${maxDuration}s linear infinite;` : ''} font-size: 12px; font-family: var(--font-family-lcd); color: var(--color-dos-green); display: inline-flex; width: max-content; opacity: 0.7;">
+                  <span style="padding-right: ${subtitleNeedsScroll ? '50px' : '0'};">${subtitle}</span>
+                  ${subtitleNeedsScroll ? `<span style="padding-right: 50px;">${subtitle}</span>` : ''}
+                </div>
+              </div>
+            </div>
+
+          </div>
+          `}
+          
+          ${!isOff ? `
+          <div style="margin-top: 12px; display: flex; justify-content: space-between; align-items: flex-end; width: 100%; height: var(--size-eq-height, 20px);">
+            <div class="winamp-eq ${isPlaying ? 'playing' : ''}">
+              ${eqHtml}
+            </div>
+
+            <!-- Compteur Digital & Ticker JS -->
+            <div class="winamp-timer" style="font-family: var(--font-family-lcd); font-size: var(--font-size-lcd-xs); font-weight: normal; color: var(--color-dos-green); opacity: 1; white-space: nowrap; margin-bottom: -0.5px;">
+              ${initialTimeDisplay}
+            </div>
+            
+            <img src="x" style="display:none;" onerror="
+              (() => {
+                window.__winampTickers = window.__winampTickers || {};
+                const key = '${entity ? entity.entity_id : 'none'}';
+                const trackId = '${escJs(attr.media_title) + '|' + escJs(attr.media_artist) + '|' + dur}';
+                const dur = ${dur};
+                const isPlaying = ${isPlaying ? 'true' : 'false'};
+                const rawPos = ${initialPos};
+                const img = this;
+                
+                let t = window.__winampTickers[key];
+                
+                if (!t || t.trackId !== trackId) {
+                  if (t && t.intervalId) clearInterval(t.intervalId);
+                  t = { trackId: trackId, pos: rawPos, dur: dur, isPlaying: isPlaying, img: img, intervalId: null };
+                  window.__winampTickers[key] = t;
+                } else {
+                  t.dur = dur;
+                  t.isPlaying = isPlaying;
+                  t.img = img;
+                  if (rawPos > t.pos || (t.pos - rawPos) > 3) {
+                    t.pos = rawPos;
+                  }
+                }
+                
+                function paint() {
+                  const root = t.img.getRootNode();
+                  if (!root || !root.querySelector) return;
+                  
+                  const timerEl = root.querySelector('.winamp-timer');
+                  if (timerEl) {
+                    const fm = Math.floor(t.pos / 60);
+                    const fs = Math.floor(t.pos % 60).toString().padStart(2, '0');
+                    const dm = Math.floor(t.dur / 60);
+                    const ds = Math.floor(t.dur % 60).toString().padStart(2, '0');
+                    timerEl.innerHTML = fm + ':' + fs + '<span style=\\'opacity:1; font-size: 0.9em;\\'>|</span>' + dm + ':' + ds;
+                  }
+                  
+                  const sliderEl = root.querySelector('.glass-slider');
+                  if (sliderEl && !sliderEl.matches(':active')) {
+                    sliderEl.value = t.pos;
+                    const fillEl = root.querySelector('.slider-progress-fill');
+                    if (fillEl) fillEl.style.width = (t.pos / t.dur) * 100 + '%';
+                  }
+                }
+                
+                paint();
+                
+                if (!t.intervalId) {
+                  t.intervalId = setInterval(() => {
+                    if (t.isPlaying && t.pos < t.dur) t.pos++;
+                    paint();
+                  }, 1000);
+                }
+              })();
+            ">
+
+            <div style="display: flex; gap: 8px; align-items: center; font-family: var(--font-family-lcd); font-size: var(--font-size-lcd-xs); font-weight: var(--font-weight-lcd); margin-bottom: 2px;">
+              <div style="color: ${shuffle ? 'var(--color-dos-green)' : 'rgba(var(--color-dos-green-rgb), 0.2)'}; filter: ${shuffle ? 'drop-shadow(0 0 2px rgba(var(--color-dos-green-rgb), 0.8))' : 'none'}; display: flex;">
+                <ha-icon icon="mdi:shuffle" style="--mdc-icon-size: 14px;"></ha-icon>
+              </div>
+              <div style="color: ${repeat && repeat !== 'off' ? 'var(--color-dos-green)' : 'rgba(var(--color-dos-green-rgb), 0.2)'}; filter: ${repeat && repeat !== 'off' ? 'drop-shadow(0 0 2px rgba(var(--color-dos-green-rgb), 0.8))' : 'none'}; display: flex;">
+                <ha-icon icon="${repeat === 'one' ? 'mdi:repeat-once' : 'mdi:repeat'}" style="--mdc-icon-size: 14px;"></ha-icon>
+              </div>
+              <div style="color: var(--color-dos-green); opacity: var(--opacity-lcd-dim); margin-left: 8px;">OUT: ${source}</div>
+            </div>
+          </div>
+          ` : ''}
+
+        </div>
+      `;
+    ]]]
+  progress: |
+    [[[
+      // --- 3. BARRE DE PROGRESSION (SLIDER) ---
+      const attr = entity ? entity.attributes : {};
+      let pct = 0;
+      let duration = Math.round(attr.media_duration || 100);
+      let position = Math.round(attr.media_position || 0);
+      
+      // --- Utilise la position déjà avancée par le ticker (info) si disponible
+      const tickerKey = entity ? entity.entity_id : 'none';
+      const trackId = (attr.media_title || '') + '|' + (attr.media_artist || '') + '|' + duration;
+      if (typeof window !== 'undefined' && window.__winampTickers) {
+        const ticker = window.__winampTickers[tickerKey];
+        if (ticker && ticker.trackId === trackId && typeof ticker.pos === 'number') {
+          position = ticker.pos;
+        }
+      }
+      
+      // Calcul du pourcentage d'avancement
+      if (duration && position) {
+        pct = (position / duration) * 100;
+      }
+      
+      // Génération d'un ID unique pour éviter les conflits HTML si plusieurs lecteurs
+      const sliderId = 'slider-' + Math.random().toString(36).substr(2, 9);
+      
+      return `
+        <div style="position: relative; width: 100%; height: 32px; display: flex; align-items: center;">
+          <!-- Piste de fond (grise, fixe) -->
+          <div style="position: absolute; left: 0; right: 0; height: 8px; background: var(--slider-track-bg-off); border-radius: 10px; border: var(--slider-track-border); box-shadow: var(--slider-track-shadow); pointer-events: none;"></div>
+
+          <!-- Remplissage vert (élément séparé, pas de pseudo-élément) -->
+          <div class="slider-progress-fill" style="position: absolute; left: 0; height: 8px; width: ${pct}%; background: var(--color-success); border-radius: 10px; pointer-events: none;"></div>
+
+          <!-- Input natif 'range' maquillé en curseur Winamp -->
+          <input type="range" class="glass-slider" id="${sliderId}" min="0" max="${duration}" value="${position}" step="1"
+            ${!entity ? 'disabled' : ''}
+            style="position: relative; z-index: 1; background: transparent;"
+            onpointerdown="event.stopPropagation();"
+            onclick="event.stopPropagation();"
+            oninput="
+              /* Met à jour visuellement la barre de progression de couleur instantanément */
+              const root = this.getRootNode();
+              if (root && root.querySelector) {
+                const fillEl = root.querySelector('.slider-progress-fill');
+                if (fillEl) fillEl.style.width = (this.value / this.max) * 100 + '%';
+
+                const tEl = root.querySelector('.winamp-timer');
+                if(tEl) {
+                  const fm = Math.floor(this.value/60);
+                  const fs = Math.floor(this.value%60).toString().padStart(2,'0');
+                  const dm = Math.floor(this.max/60);
+                  const ds = Math.floor(this.max%60).toString().padStart(2,'0');
+                  tEl.innerHTML = fm + ':' + fs + '<span style=\\'opacity:1; font-size: 0.9em;\\'>|</span>' + dm + ':' + ds;
+                }
+              }
+            "
+            onchange="
+              /* Envoie la nouvelle position au service HA (media_seek) lors du relâchement */
+              if (!'${entity ? entity.entity_id : ''}') return;
+              document.querySelector('home-assistant').hass.callService('media_player', 'media_seek', {
+                entity_id: '${entity ? entity.entity_id : ''}',
+                seek_position: parseFloat(this.value)
+              });
+            "
+          >
+        </div>
+      `;
+    ]]]
+  controls: >
+    [[[
+      // --- 4. BOUTONS DE CONTRÔLE MULTIMÉDIA ---
+      // Détection de l'état actuel pour afficher dynamiquement l'icône Play ou Pause
+      const isPlaying = entity ? (entity.state === 'playing') : false;
+      const eid = entity ? entity.entity_id : '';
+      const attr = entity ? entity.attributes : {};
+      
+      // Détection de la fonction STOP matérielle
+      // Le chiffre '4096' est le code officiel (Bitmask SUPPORT_STOP) de Home Assistant
+      // Il permet de vérifier mathématiquement si l'enceinte possède la capacité d'être complètement stoppée.
+      const supportsStop = attr.supported_features ? (attr.supported_features & 4096) !== 0 : false;
+      const stopService = supportsStop ? 'media_stop' : 'media_pause'; // Repli sur 'pause' si stop n'est pas géré
+      
+      // Gestion de l'état "Shuffle" (Aléatoire)
+      const isShuffle = attr.shuffle === true;
+      
+      // Gestion intelligente du mode boucle (Repeat)
+      // Cycle standard : off -> all -> one -> off
+      const repeatMode = attr.repeat || 'off';
+      const isRepeat = repeatMode !== 'off';
+      const repeatIcon = repeatMode === 'one' ? 'mdi:repeat-once' : (repeatMode === 'all' ? 'mdi:repeat' : 'mdi:repeat-off');
+      
+      // Calcul du prochain état de boucle lors du clic sur le bouton Repeat
+      let nextRepeat = 'all';
+      if (repeatMode === 'all') nextRepeat = 'one';
+      if (repeatMode === 'one') nextRepeat = 'off';
+
+      return `
+        <!-- Conteneur des boutons alignés horizontalement -->
+        <div style="display: flex; gap: 8px; align-items: center; justify-content: flex-start; padding-bottom: 4px;">
+          
+          <!-- Bouton PRÉCÉDENT -->
+          <div class="glass-btn" onclick="event.stopPropagation(); if('${eid}') document.querySelector('home-assistant').hass.callService('media_player', 'media_previous_track', {entity_id: '${eid}'})">
+            <ha-icon icon="mdi:skip-previous"></ha-icon>
+          </div>
+          
+          <!-- Bouton LECTURE (S'illumine via la classe 'active' si la musique joue) -->
+          <div class="glass-btn ${isPlaying ? 'active' : ''}" onclick="event.stopPropagation(); if('${eid}') document.querySelector('home-assistant').hass.callService('media_player', 'media_play', {entity_id: '${eid}'})">
+            <ha-icon icon="mdi:play"></ha-icon>
+          </div>
+
+          <!-- Bouton PAUSE -->
+          <div class="glass-btn" onclick="event.stopPropagation(); if('${eid}') document.querySelector('home-assistant').hass.callService('media_player', 'media_pause', {entity_id: '${eid}'})">
+            <ha-icon icon="mdi:pause"></ha-icon>
+          </div>
+
+          <!-- Bouton STOP (Dynamique : appelle 'media_stop' si géré par le lecteur, sinon 'media_pause' en secours) -->
+          <div class="glass-btn" onclick="event.stopPropagation(); if('${eid}') document.querySelector('home-assistant').hass.callService('media_player', '${stopService}', {entity_id: '${eid}'})">
+            <ha-icon icon="mdi:stop"></ha-icon>
+          </div>
+          
+          <!-- Bouton SUIVANT -->
+          <div class="glass-btn" onclick="event.stopPropagation(); if('${eid}') document.querySelector('home-assistant').hass.callService('media_player', 'media_next_track', {entity_id: '${eid}'})">
+            <ha-icon icon="mdi:skip-next"></ha-icon>
+          </div>
+
+          <!-- Bouton ALÉATOIRE (Plus petit via 'glass-btn-sm', s'illumine si actif) -->
+          <div class="glass-btn glass-btn-sm ${isShuffle ? 'active' : ''}" onclick="event.stopPropagation(); if('${eid}') document.querySelector('home-assistant').hass.callService('media_player', 'shuffle_set', {entity_id: '${eid}', shuffle: ${!isShuffle}})">
+            <ha-icon icon="mdi:shuffle"></ha-icon>
+          </div>
+          
+          <!-- Bouton BOUCLE (Envoie la commande avec la variable calculée 'nextRepeat') -->
+          <div class="glass-btn glass-btn-sm ${isRepeat ? 'active' : ''}" onclick="event.stopPropagation(); if('${eid}') document.querySelector('home-assistant').hass.callService('media_player', 'repeat_set', {entity_id: '${eid}', repeat: '${nextRepeat}'})">
+            <ha-icon icon="${repeatIcon}"></ha-icon>
+          </div>
+        </div>
+      `;
+    ]]]
+
+extra_styles: |
+  /* ==========================================================================
+     [ZONES MODIFIABLES] : STYLES CSS (COULEURS & THÈMES)
+     C'est ici que vous pouvez changer les couleurs globales du lecteur Winamp.
+     Remplacez les codes (#XXXXXX) ou les noms de couleurs pour adapter le thème.
+     ========================================================================== */
+  :host {
+    /* --- COULEURS DU CHÂSSIS --- 
+       Jeux d'ombres et lumières pour créer l'effet 3D "encastré" */
+    --color-chassis-base: #1c1c1c;
+    --color-chassis-shadow-deep: #0a0a0a;
+    --color-chassis-shadow-light: #111111;
+    --color-chassis-highlight-deep: #333333;
+    --color-chassis-highlight-light: #2b2b2b;
+    
+    /* ---------------------------------------------------------
+       [ZONE MODIFIABLE] : COULEURS DES TEXTES ET BOUTONS
+       --------------------------------------------------------- */
+    --color-dos-green: #00FF00; /* Le fameux vert Winamp (Textes de l'écran) */
+    --color-dos-green-rgb: 0, 255, 0; /* Mettez les valeurs RGB de votre couleur ci-dessus (ex: pour le vert) */
+    --color-neon-active: rgb(138, 43, 226); /* Couleur des boutons physiques (Violet par défaut) */
+    --color-success: rgb(46, 139, 87); /* Couleur du bouton actif (Lecture en cours) */
+    
+    /* ---------------------------------------------------------
+       [ZONE MODIFIABLE] : COULEURS DES DÉGRADÉS (FOND ET ÉGALISEUR)
+       --------------------------------------------------------- */
+    --bg-screen-lcd: radial-gradient(ellipse at center, #0f240f 0%, #030803 80%, #000000 100%); /* Fond de l'écran LCD */
+    
+    /* 
+       Couleurs de l'égaliseur animé :
+       - Actuellement en "Dégradé doux" : Vert de 0%, Jaune progressif jusqu'à 60%, Rouge à 100%.
+       - Si vous voulez que le rouge arrive plus bas, baissez les pourcentages (ex: #FFFF00 30%, #FF0000 60%).
+       - Si vous voulez des "Blocs LED" nets (sans mélange baveux), doublez les pourcentages au point de rupture :
+         Exemple LED : linear-gradient(to top, #00FF00 0%, #00FF00 60%, #FFFF00 60%, #FFFF00 85%, #FF0000 85%, #FF0000 100%)
+       - Vous pouvez empiler autant de couleurs que vous le souhaitez.
+    */
+    --bg-eq-bars: linear-gradient(to top, #00FF00 0%, #FFFF00 60%, #FF0000 100%);
+    
+    /* ---------------------------------------------------------
+       [ZONE MODIFIABLE] : TYPOGRAPHIE LCD
+       Ajustez la taille de police si l'écran LCD est trop petit chez vous
+       --------------------------------------------------------- */
+    --font-family-lcd: monospace;
+    --font-weight-lcd: bold;
+    --font-size-lcd-large: 24px;
+    --font-size-lcd-xs: 10px;
+    --letter-spacing-lcd: 4px;
+    
+    /* --- EFFETS DE LUEUR (NÉON) --- */
+    --text-shadow-lcd-strong: 0 0 8px rgba(0, 255, 0, 0.8);
+    --text-shadow-lcd-soft: 0 0 5px rgba(0, 255, 0, 0.5);
+    --shadow-neon-glow-active: drop-shadow(0 0 5px var(--color-neon-active)); /* Aura autour du bouton physique pressé */
+    --shadow-neon-glow-success: drop-shadow(0 0 6px var(--color-success)); /* Aura autour du bouton "Lecture" actif */
+    --opacity-lcd-dim: 0.8;
+    --opacity-lcd-dimmer: 0.7;
+    
+    /* ---------------------------------------------------------
+       EFFETS "VERRE BOMBÉ" (BOUTONS PHYSIQUES)
+       Construits avec de multiples couches d'ombres et reflets
+       --------------------------------------------------------- */
+    /* Fonds sphériques pour créer le volume du bouton */
+    --bg-verre-bombe: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.15) 0%, rgba(255,255,255,0.02) 50%, rgba(0,0,0,0.4) 100%);
+    --bg-verre-bombe-pressed: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.05) 0%, rgba(0,0,0,0.6) 100%);
+    --bg-verre-bombe-active: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.25) 0%, rgba(255,255,255,0.08) 50%, rgba(0,0,0,0.2) 100%);
+    
+    /* Ombres externes (portée sur le châssis) et internes (relief bombé) */
+    --shadow-verre-bombe: 2px 4px 6px rgba(0,0,0,0.6), -1px -1px 1px rgba(255,255,255,0.08), inset 1px 1px 3px rgba(255,255,255,0.3), inset -2px -2px 6px rgba(0,0,0,0.7);
+    --shadow-verre-bombe-pressed: 0px 1px 2px rgba(0,0,0,0.8), -1px -1px 1px rgba(255,255,255,0.08), inset 2px 2px 8px rgba(0,0,0,0.8), inset -1px -1px 2px rgba(255,255,255,0.1);
+    --shadow-verre-bombe-active: 2px 4px 6px rgba(0,0,0,0.6), -1px -1px 1px rgba(255,255,255,0.08), inset 1px 1px 4px rgba(255,255,255,0.5), inset -2px -2px 6px rgba(0,0,0,0.7);
+    
+    /* --- COULEURS ET OMBRES DE LA BARRE DE PROGRESSION (SLIDER) --- */
+    --slider-track-bg-off: rgba(0, 0, 0, 0.6); /* Couleur du fond de la piste */
+    --slider-track-border: 1px solid rgba(255, 255, 255, 0.05);
+    --slider-track-shadow: inset 0 1px 3px rgba(0,0,0,0.8);
+    --slider-thumb-bg: linear-gradient(135deg, rgba(255,255,255,0.2) 0%, transparent 40%, rgba(0,0,0,0.2) 100%); /* Effet verre du curseur */
+    --slider-thumb-border: 1px solid rgba(255, 255, 255, 0.1);
+    --slider-thumb-border-top: 1px solid rgba(255, 255, 255, 0.5);
+    --slider-thumb-border-left: 1px solid rgba(255, 255, 255, 0.3);
+    --slider-thumb-shadow: 2px 4px 6px rgba(0,0,0,0.5), inset 1px 1px 2px rgba(255,255,255,0.5), inset -1px -1px 2px rgba(0,0,0,0.4);
+    --slider-thumb-backdrop: blur(12px) brightness(1.15); /* Floutage derrière le curseur */
+    
+    /* Ombre d'encastrement globale (L'écran entier semble creusé dans le plastique) */
+    --shadow-encastrement: inset 2px 2px 5px rgba(255, 255, 255, 0.25), inset -3px -3px 8px rgba(0,0,0,1), inset 0 0 20px rgba(0,0,0,0.8);
+    
+    /* ---------------------------------------------------------
+       [ZONE MODIFIABLE] : DIMENSIONS ET TAILLES GLOBALES
+       Ajustez ces valeurs pour redimensionner globalement les éléments
+       --------------------------------------------------------- */
+    --size-art-cover: 190px; /* Largeur de la pochette (La grille s'ajustera automatiquement) */
+    --size-btn-physique: 28px; /* Diamètre des boutons de contrôle principaux */
+    --size-btn-physique-sm: 20px; /* Diamètre des petits boutons (Shuffle/Repeat) */
+    --size-eq-height: 20px; /* [ZONE MODIFIABLE] Hauteur de l'égaliseur dynamique */
+    --radius-md: 12px; /* Arrondi des angles de la pochette et de l'écran */
+  }
+
+  /* --- ANIMATION GLOBALE DE LA CARTE --- */
+  /* Style de base de la carte : bordures subtiles et ombres complexes pour l'effet de profondeur */
+  ha-card {
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.02) 100%) !important;
+    border: 1.5px solid rgba(255, 255, 255, 0.15) !important;
+    border-radius: 24px !important;
+    box-shadow: 0 16px 36px #000000CC, 0 0 1px #FFFFFF1A, 0 4px 12px #FFFFFF08, inset 0 1.5px 1.5px #FFFFFF59, inset 0 3px 10px #FFFFFF1F, inset 0 -3px 6px #00000099 !important;
+    transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1) !important;
+  }
+
+  /* 
+     [ZONE MODIFIABLE] : EFFET AU SURVOL (HOVER) 
+     La carte "monte" de 4px vers le haut quand on passe la souris. 
+     Mettez translateY(0px) si vous ne voulez pas d'animation.
+  */
+  ha-card:hover {
+    transform: translateY(-4px) !important;
+    border-color: rgba(255, 255, 255, 0.25) !important;
+    box-shadow: 0 24px 48px #000000D9, 0 0 2px #FFFFFF26, 0 6px 16px #FFFFFF0D, inset 0 1.5px 1.5px #FFFFFF73, inset 0 3px 10px #FFFFFF2E, inset 0 -3px 6px #000000B3 !important;
+  }
+
+  /* --- STYLES DE LA BARRE DE PROGRESSION --- */
+  .glass-slider {
+    -webkit-appearance: none;
+    width: 100%;
+    height: 32px;
+    background: transparent;
+    outline: none;
+    cursor: pointer;
+    margin: 0;
+  }
+  
+  /* Piste du slider (La rigole creusée dans le châssis) */
+  .glass-slider::-webkit-slider-runnable-track {
+    width: 100%;
+    height: 8px;
+    background: linear-gradient(to right, var(--color-success) var(--slider-pct, 0%), var(--slider-track-bg-off) var(--slider-pct, 0%));
+    border-radius: 10px;
+    border: var(--slider-track-border);
+    box-shadow: var(--slider-track-shadow);
+  }
+  
+  /* 
+     ==========================================================================
+     [ZONE MODIFIABLE] : APPARENCE DU CURSEUR (Slider Thumb)
+     ⚠️ RÈGLE D'OR DU WEB : Modifiez TOUJOURS les DEUX blocs ci-dessous à l'identique !
+     - Le 1er bloc (-webkit) contrôle : Chrome, Edge, Brave, Safari, Appli Mobile.
+     - Le 2ème bloc (-moz) contrôle : Firefox.
+     Si vous modifiez la taille (width: 14px; height: 24px) dans l'un, faites-le dans l'autre !
+     ========================================================================== 
+  */
+  .glass-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 14px;
+    height: 24px;
+    margin-top: -8px;
+    background: var(--slider-thumb-bg);
+    backdrop-filter: var(--slider-thumb-backdrop);
+    -webkit-backdrop-filter: var(--slider-thumb-backdrop);
+    border: var(--slider-thumb-border);
+    border-top: var(--slider-thumb-border-top);
+    border-left: var(--slider-thumb-border-left);
+    border-radius: 5px;
+    box-shadow: var(--slider-thumb-shadow);
+    cursor: pointer;
+  }
+  
+  /* --- COMPATIBILITÉ FIREFOX --- */
+  /* Piste du slider (Version Firefox) */
+  .glass-slider::-moz-range-track {
+    width: 100%;
+    height: 8px;
+    background: linear-gradient(to right, var(--color-success) var(--slider-pct, 0%), var(--slider-track-bg-off) var(--slider-pct, 0%));
+    border-radius: 10px;
+    border: var(--slider-track-border);
+    box-shadow: var(--slider-track-shadow);
+  }
+  
+  /* [ZONE MODIFIABLE] : Curseur effet verre (Version Firefox - Gardez les mêmes dimensions que -webkit ci-dessus !) */
+  .glass-slider::-moz-range-thumb {
+    width: 14px;
+    height: 24px;
+    background: var(--slider-thumb-bg);
+    backdrop-filter: var(--slider-thumb-backdrop);
+    -webkit-backdrop-filter: var(--slider-thumb-backdrop);
+    border: var(--slider-thumb-border);
+    border-top: var(--slider-thumb-border-top);
+    border-left: var(--slider-thumb-border-left);
+    border-radius: 5px;
+    box-shadow: var(--slider-thumb-shadow);
+    cursor: pointer;
+  }
+
+  /* --- STYLES DES BOUTONS PHYSIQUES (.glass-btn) --- */
+  .glass-btn {
+    width: var(--size-btn-physique);
+    height: var(--size-btn-physique);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-verre-bombe);
+    border: 2px solid var(--color-chassis-base);
+    box-shadow: var(--shadow-verre-bombe);
+    cursor: pointer;
+    transition: transform 0.1s ease, box-shadow 0.1s ease;
+  }
+
+  .glass-btn-sm {
+    width: var(--size-btn-physique-sm) !important;
+    height: var(--size-btn-physique-sm) !important;
+  }
+
+  /* [ZONE MODIFIABLE] : APPARENCE DES ICÔNES DES BOUTONS */
+  .glass-btn ha-icon {
+    --mdc-icon-size: 18px; /* Taille des icônes à l'intérieur du bouton */
+    /* La couleur pointe vers la variable globale '--color-neon-active'.
+       Vous pouvez soit changer la variable tout en haut, soit écrire votre couleur ici (ex: red) */
+    color: var(--color-neon-active);
+    opacity: 0.95;
+    filter: var(--shadow-neon-glow-active);
+    transition: all 0.2s ease;
+  }
+
+  .glass-btn-sm ha-icon {
+    --mdc-icon-size: 14px !important;
+  }
+
+  /* Effet d'enfoncement physique au clic (active) */
+  .glass-btn:active {
+    transform: translateY(2px);
+    background: var(--bg-verre-bombe-pressed);
+    box-shadow: var(--shadow-verre-bombe-pressed);
+  }
+
+  /* L'icône s'illumine lors de la pression */
+  .glass-btn:active ha-icon {
+    color: var(--color-success) !important;
+    filter: var(--shadow-neon-glow-success) !important;
+    opacity: 1 !important;
+  }
+
+  .glass-btn.active {
+    background: var(--bg-verre-bombe-active);
+    box-shadow: var(--shadow-verre-bombe-active);
+  }
+
+  .glass-btn.active ha-icon {
+    color: var(--color-success);
+    opacity: 1;
+    filter: var(--shadow-neon-glow-success);
+  }
+
+  /* --- EFFET MARQUEE (DÉFILEMENT DE TEXTE) --- */
+  /* La classe marquee applique une translation continue de droite à gauche */
+  .marquee {
+    animation: marquee 15s linear infinite;
+  }
+  
+  /* L'animation translate de 0 à -50% (car le texte est dupliqué 2 fois dans le HTML pour boucler) */
+  @keyframes marquee {
+    0% { transform: translateX(0); }
+    100% { transform: translateX(-50%); }
+  }
+  
+  /* --- STYLES DE L'ÉGALISEUR --- */
+  /* Conteneur principal des barres */
+  .winamp-eq {
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: var(--size-eq-height, 20px);
+  }
+  
+  /* Style de base d'une seule barre de l'égaliseur */
+  .winamp-eq .bar {
+    width: 4px;
+    height: 2px;
+    background: var(--bg-eq-bars);
+    background-size: 100% var(--size-eq-height, 20px);
+    background-position: bottom;
+    border-radius: 1px 1px 0 0;
+    opacity: 0.85;
+  }
+  
+  /* Attribution des animations individuelles aux 10 types de barres (uniquement si classe 'playing' active) */
+  .winamp-eq.playing .bar1 { animation: eq1 0.4s infinite alternate ease-in-out; }
+  .winamp-eq.playing .bar2 { animation: eq2 0.6s infinite alternate ease-in-out; }
+  .winamp-eq.playing .bar3 { animation: eq3 0.5s infinite alternate ease-in-out; }
+  .winamp-eq.playing .bar4 { animation: eq4 0.7s infinite alternate ease-in-out; }
+  .winamp-eq.playing .bar5 { animation: eq5 0.45s infinite alternate ease-in-out; }
+  .winamp-eq.playing .bar6 { animation: eq6 0.65s infinite alternate ease-in-out; }
+  .winamp-eq.playing .bar7 { animation: eq7 0.55s infinite alternate ease-in-out; }
+  .winamp-eq.playing .bar8 { animation: eq8 0.75s infinite alternate ease-in-out; }
+  .winamp-eq.playing .bar9 { animation: eq9 0.4s infinite alternate ease-in-out; }
+  .winamp-eq.playing .bar10 { animation: eq10 0.8s infinite alternate ease-in-out; }
+
+  /* Animations relatives (%) pour s'adapter dynamiquement à var(--size-eq-height) */
+  @keyframes eq1 { 0% { height: 10%; } 100% { height: 80%; } }
+  @keyframes eq2 { 0% { height: 20%; } 100% { height: 100%; } }
+  @keyframes eq3 { 0% { height: 10%; } 100% { height: 70%; } }
+  @keyframes eq4 { 0% { height: 30%; } 100% { height: 90%; } }
+  @keyframes eq5 { 0% { height: 15%; } 100% { height: 75%; } }
+  @keyframes eq6 { 0% { height: 25%; } 100% { height: 95%; } }
+  @keyframes eq7 { 0% { height: 10%; } 100% { height: 60%; } }
+  @keyframes eq8 { 0% { height: 20%; } 100% { height: 85%; } }
+  @keyframes eq9 { 0% { height: 10%; } 100% { height: 80%; } }
+  @keyframes eq10 { 0% { height: 25%; } 100% { height: 100%; } }
