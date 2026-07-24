@@ -1,5 +1,9 @@
 # Lecteur Winamp (Standalone)
 
+<p align="center">
+  <img src="assets/winanp%20standalone%2002.gif" alt="Démonstration animée du lecteur Winamp" />
+</p>
+
 Une carte multimédia complète et très poussée visuellement pour Home Assistant. Elle s'inspire de l'esthétique du célèbre logiciel Winamp, tout en adoptant un look moderne de type "Glassmorphism" (verre dépoli).
 
 ## ✨ Fonctionnalités Détaillées
@@ -40,3 +44,15 @@ Une carte multimédia complète et très poussée visuellement pour Home Assista
 
 Toutes les couleurs, la police d'écriture et les effets d'ombre sont centralisés dans la section `styles: > custom_fields:` au début du fichier. 
 Cherchez la mention `[ZONE MODIFIABLE]` pour ajuster facilement l'apparence à votre goût (changement de couleur dominante, opacité du verre, etc.).
+
+## 📸 Exemples et Démos
+
+Voici d'autres aperçus de la carte et de ses animations (notamment la barre de progression Zéro Latence) :
+
+<p align="center">
+  <img src="assets/winanp%20standalone.gif" alt="Aperçu Standalone" style="max-width: 45%; margin: 5px;" />
+  <img src="assets/winamp%20player.gif" alt="Aperçu Player 1" style="max-width: 45%; margin: 5px;" />
+  <br />
+  <img src="assets/winamp%20player%2002.gif" alt="Aperçu Player 2" style="max-width: 45%; margin: 5px;" />
+</p>
+
